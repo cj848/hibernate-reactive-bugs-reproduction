@@ -1,11 +1,16 @@
 package com.linecorp.kotlinjdsl.spring.data.example
 
 import com.linecorp.kotlinjdsl.spring.data.example.entity.Book
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import kotlinx.coroutines.future.await
 import org.hibernate.reactive.mutiny.Mutiny
 import org.hibernate.reactive.stage.Stage
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
-import org.springframework.web.bind.annotation.*
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
 import reactor.core.publisher.Mono
 import java.util.concurrent.CompletionStage
 
@@ -15,12 +20,12 @@ class BookController(
     private val bookService: BookService,
 ) {
     @PostMapping("/mutiny")
-    fun createBook(@RequestBody spec: BookService.CreateBookSpec): Mono<ResponseEntity<Long>> =
-        Mono.fromCompletionStage { bookService.create(spec) }.map { ResponseEntity.ok().body(it.id) }
+    suspend fun createBook(@RequestBody spec: BookService.CreateBookSpec): ResponseEntity<Long> =
+        bookService.create(spec).let { ResponseEntity.ok().body(it.id) }
 
     @PostMapping("/stage")
-    fun createBookStage(@RequestBody spec: BookService.CreateBookSpec): Mono<ResponseEntity<Long>> =
-        Mono.fromCompletionStage { bookService.createStage(spec) }.map { ResponseEntity.ok().body(it.id) }
+    suspend fun createBookStage(@RequestBody spec: BookService.CreateBookSpec): ResponseEntity<Long> =
+        bookService.createStage(spec).let { ResponseEntity.ok().body(it.id) }
 }
 
 
@@ -29,17 +34,18 @@ class BookService(
     private val mutinySessionFactory: Mutiny.SessionFactory,
     private val stageSessionFactory: Stage.SessionFactory,
 ) {
-    fun create(spec: CreateBookSpec): CompletionStage<Book> {
+    suspend fun create(spec: CreateBookSpec): Book {
         val book = Book(name = spec.name)
         return mutinySessionFactory.withSession { session -> session.persist(book).flatMap { session.flush() } }
             .map { book }
-            .subscribeAsCompletionStage()
+            .awaitSuspending()
     }
 
-    fun createStage(spec: CreateBookSpec): CompletionStage<Book> {
+    suspend fun createStage(spec: CreateBookSpec): Book {
         val book = Book(name = spec.name)
         return stageSessionFactory.withSession { session -> session.persist(book).thenCompose { session.flush() } }
             .thenApply { book }
+            .await()
     }
 
     data class CreateBookSpec(
